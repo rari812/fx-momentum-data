@@ -1,32 +1,28 @@
 #!/usr/bin/env python3
 """
-Path B FX fetch — runs on a GitHub Actions runner (open internet; reaches Yahoo).
-Pulls 6mo daily closes for the momentum-ranking universe, validates coverage and
-freshness, and commits data + a coverage report to the repo. The chamber analysis
-script reads the committed files via raw.githubusercontent.com.
+Path B FX fetch (MAJORS ONLY) — runs on a GitHub Actions runner.
+Pulls 6mo daily closes for the 7 USD legs needed to build the 28 G10-major
+crosses. Exotics (ZAR/MXN/TRY) and Scandi (NOK/SEK) dropped — untradeable /
+spread-punitive on BlackBull. Validates coverage/freshness, commits data.
 
-DATA CONTRACT (must stay in sync with momentum_rank.py):
-  data/fx_daily.csv     long format: date,ticker,close
+DATA CONTRACT (sync with momentum_rank.py):
+  data/fx_daily.csv     date,ticker,close
   data/coverage.csv     ticker,rows,first_date,last_date,days_stale,ok
-  data/last_updated.txt ISO-8601 UTC timestamp
+  data/last_updated.txt ISO-8601 UTC
 """
 import os, sys, datetime as dt
 import pandas as pd
 import yfinance as yf
 
-# USD legs only — cleanest free data. Currency strength is built from these in
-# momentum_rank.py via equal-weight-basket decomposition, so all crosses aren't needed.
+# 7 USD legs -> all 28 major crosses are derivable downstream.
 TICKERS = [
-    "EURUSD=X", "GBPUSD=X", "AUDUSD=X", "NZDUSD=X",   # USD-quote majors
-    "USDJPY=X", "USDCHF=X", "USDCAD=X",               # USD-base majors
-    "USDNOK=X", "USDSEK=X",                            # Scandi
-    "USDMXN=X", "USDZAR=X", "USDTRY=X",               # liquid EM
+    "EURUSD=X", "GBPUSD=X", "AUDUSD=X", "NZDUSD=X",
+    "USDJPY=X", "USDCHF=X", "USDCAD=X",
 ]
 
-PERIOD = "6mo"        # need >=50 trading days; 6mo gives margin
-MIN_ROWS = 60         # reject series too short to compute a 50d return safely
-MAX_STALE_DAYS = 4    # tolerate a long weekend; flag anything older
-
+PERIOD = "6mo"
+MIN_ROWS = 60
+MAX_STALE_DAYS = 4
 OUTDIR = "data"
 
 
@@ -36,7 +32,7 @@ def fetch_one(ticker):
         return None
     s = h["Close"].dropna()
     idx = pd.to_datetime(s.index)
-    if idx.tz is not None:                       # normalise tz-aware index safely
+    if idx.tz is not None:
         idx = idx.tz_convert("UTC").tz_localize(None)
     s.index = idx.normalize()
     return s
@@ -46,7 +42,6 @@ def main():
     os.makedirs(OUTDIR, exist_ok=True)
     today = dt.date.today()
     rows, cov, failed = [], [], []
-
     for t in TICKERS:
         try:
             s = fetch_one(t)
@@ -63,24 +58,16 @@ def main():
         cov.append((t, len(s), str(first), str(last), stale, ok))
         for d, v in s.items():
             rows.append((d.date().isoformat(), t, float(v)))
-
     if not rows:
-        print("[fatal] no data fetched for any ticker", file=sys.stderr)
+        print("[fatal] no data fetched", file=sys.stderr)
         sys.exit(1)
-
     pd.DataFrame(rows, columns=["date", "ticker", "close"]) \
         .to_csv(os.path.join(OUTDIR, "fx_daily.csv"), index=False)
-
-    covdf = pd.DataFrame(
-        cov, columns=["ticker", "rows", "first_date", "last_date", "days_stale", "ok"])
-    covdf.to_csv(os.path.join(OUTDIR, "coverage.csv"), index=False)
-
+    pd.DataFrame(cov, columns=["ticker","rows","first_date","last_date","days_stale","ok"]) \
+        .to_csv(os.path.join(OUTDIR, "coverage.csv"), index=False)
     with open(os.path.join(OUTDIR, "last_updated.txt"), "w") as f:
         f.write(dt.datetime.utcnow().isoformat() + "Z\n")
-
-    n_ok = int(covdf["ok"].sum())
-    print(f"fetched {len(TICKERS)} tickers | ok={n_ok} | failed={len(failed)} {failed}")
-    # Partial coverage is not fatal; the analysis script drops flagged tickers.
+    print(f"fetched {len(TICKERS)} | failed={len(failed)} {failed}")
 
 
 if __name__ == "__main__":
