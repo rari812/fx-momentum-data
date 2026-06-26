@@ -1,0 +1,24 @@
+name: fetch-fx
+on:
+  schedule:
+    - cron: "0 22 * * 1-5"     # 22:00 UTC weekdays (after NY close). Adjust if needed.
+  workflow_dispatch: {}          # manual "Run workflow" button
+permissions:
+  contents: write                # required so the job can commit data back
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install yfinance pandas
+      - run: python fetch_fx_data.py
+      - name: commit data
+        run: |
+          git config user.name  "fx-fetch-bot"
+          git config user.email "actions@github.com"
+          git add data/
+          git diff --quiet --staged || git commit -m "fx data $(date -u +%FT%TZ)"
+          git push
